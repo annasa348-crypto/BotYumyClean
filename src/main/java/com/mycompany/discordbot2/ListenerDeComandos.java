@@ -17,21 +17,19 @@ public class ListenerDeComandos extends ListenerAdapter {
     private static final String API_KEY_SECRETA = System.getenv("GEMINI_API_KEY");
     private static final String GEMINI_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=";
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
-    private static final OkHttpClient HTTP_CLIENT = new OkHttpClient();
-    private final String prefix = "!bot"; // Prefijo del comando
+    private static final OkHttpClient HTTP_CLIENT = new OkHttpClient(); //comunicar con la api para enviar preguntas y recibir las respuestas 
+    private final String prefix = "!bot"; // Prefijo del comando para el bot 
 
-    // -------------------------------------------------------------------------
-    // Bloque de Instrucciones (PROMPT) - Base sin formatear
-    // -------------------------------------------------------------------------
+   //este es el prompt de la ia
     private final String PROMPT_CHEF_BASE = 
         "Actúa como un chef italiano apasionado llamado Yumy. Debes responder con un toque de humor y un ligero acento italiano usando frases como: \"Mamma mia\", \"Bella\", \"Perfetto!\".\n\n"
         + "Tu respuesta debe usar este formato estricto: \n"
-        + "**Recetta di Yumy: %s**\n" // Marcador 1: Para el nombre de la receta
+        + "**Recetta di Yumy: %s**\n" // marcador 1: Para el nombre de la receta
         + "*Ingredienti (con cantidades aproximadas):*\n"
         + " [Lista de ingredientes]\n"
         + "*Passos (narrados con acento italiano):*\n"
         + " [Passo 1, Passo 2, etc.]\n"
-        + "Plato: %s. ¡El plato es una cosa de dos bocas en el prompt!"; // Marcador 2: Para repetir el nombre del plato
+        + "Plato: %s. ¡El plato es una cosa de dos bocas en el prompt!"; // marcador 2: Para repetir el nombre del plato
 
 
     @Override
@@ -43,15 +41,15 @@ public class ListenerDeComandos extends ListenerAdapter {
 
         String mensaje_original = event.getMessage().getContentRaw();
 
-        // 1. Detección del comando "!bot"
+        // este if detecta el comando del bot o el prefijo 
         if (mensaje_original.startsWith(prefix)) {
             
-            // Extracción del mensaje del usuario
+            // recibe el mensaje del usuario 
             String mensaje_solicitado = mensaje_original.substring(prefix.length()).trim();
 
             if (mensaje_solicitado.isEmpty()) {
                 event.getChannel().sendMessage("Mamma mia! Per favore, usa el formato: `" + prefix + " [tu pregunta]`").queue();
-                return;
+                return; //este if cuando el bot "indica" que use el prefijo !bot
             }
 
             // Enviar mensaje de espera y capturar su ID para poder editarlo después
@@ -70,18 +68,18 @@ public class ListenerDeComandos extends ListenerAdapter {
      */
     private void enviarMensajeAIAsincrono(String preguntaUsuario, net.dv8tion.jda.api.entities.Message mensajeDiscord) {
 
-        // 1. VERIFICACIÓN DE CLAVE API (Evita fallos si Render no la tiene)
+        // verifica la clave Api de gemini 
         if (API_KEY_SECRETA == null || API_KEY_SECRETA.isEmpty()) {
             mensajeDiscord.editMessage("❌ Mamma mia! Non posso trovare la chiave segreta (GEMINI_API_KEY). ¡Verifica la configuración di Render!").queue();
             return;
         }
 
-        // 2. Construir el prompt completo
+        // construye el prompt para recibir 
         String platoSolicitado = preguntaUsuario; 
         String fullPrompt = String.format(PROMPT_CHEF_BASE, platoSolicitado, platoSolicitado) 
                             + "\n\nLa pregunta detallada del cliente es: " + preguntaUsuario;
 
-        // 3. Construir el cuerpo JSON
+        // Construir el cuerpo JSON, crea el mensaje modelo para enviar la pregunts al modelo gemini a tarvez del http
         String jsonPayload = String.format(
             """
             {
@@ -100,28 +98,28 @@ public class ListenerDeComandos extends ListenerAdapter {
             fullPrompt.replace("\"", "\\\"").replace("\n", "\\n") 
         );
 
-        RequestBody requestBody = RequestBody.create(jsonPayload, JSON_MEDIA_TYPE);
+        RequestBody requestBody = RequestBody.create(jsonPayload, JSON_MEDIA_TYPE); //convierte el texto en json para que la libreria okhttpclient lo mande a travez de la red
 
-        // 4. Construir la solicitud HTTP
+        //  Construir la solicitud HTTP
         Request request = new Request.Builder()
-            .url(GEMINI_URL + API_KEY_SECRETA)
-            .post(requestBody)
+            .url(GEMINI_URL + API_KEY_SECRETA) //define el destino: La URL de de google 
+            .post(requestBody) //define el metodo POST: los datos se envian al servidor  
             .build();
         
-        // 5. Ejecutar la solicitud ASÍNCRONA (para evitar bloqueos de hilo)
+        // Ejecutar la solicitud ASÍNCRONA (para evitar bloqueos de hilo)
         HTTP_CLIENT.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(@NotNull okhttp3.Call call, @NotNull IOException e) {
                 // Falla de red, timeout, etc.
                 mensajeDiscord.editMessage("❌ Lo siento, hubo un fallo técnico en la conexión con la IA: " + e.getMessage()).queue();
-            }
+            } //cuando la conexion de ia falla 
 
             @Override
             public void onResponse(@NotNull okhttp3.Call call, @NotNull Response response) throws IOException {
-                String textoRespuesta;
+                String textoRespuesta; //cuando gemini responde al texto con exito o con un error http 
                 
                 try {
-                    // Manejo de error HTTP (clave inválida, rate limit, etc.)
+                    // Manejo de error HTTP (clave inválida, limite, etc.)
                     if (!response.isSuccessful()) {
                         String errorBody = response.body() != null ? response.body().string() : "No body";
                         textoRespuesta = "❌ Fallo API HTTP (" + response.code() + "). Detalle: " + errorBody;
@@ -129,7 +127,7 @@ public class ListenerDeComandos extends ListenerAdapter {
                         return;
                     }
 
-                    // Leer y analizar la respuesta JSON
+                    // leer y analizar la respuesta JSON
                     String responseString = response.body().string();
                     
                     // Análisis del JSON (Busca la clave "text")
@@ -154,7 +152,7 @@ public class ListenerDeComandos extends ListenerAdapter {
                     }
                     
                     // Enviar la respuesta a Discord
-                    mensajeDiscord.editMessage(textoRespuesta).queue();
+                    mensajeDiscord.editMessage(textoRespuesta).queue(); 
 
                 } catch (Exception e) {
                     System.err.println("Error fatal en Gemini API: " + e.getMessage());
